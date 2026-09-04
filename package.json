@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "node --test test/**/*.test.mjs",
+    "test": "npm run build --silent && node --test test/**/*.test.mjs",
     "lint": "eslint src test",
     "typecheck": "tsc --noEmit",
     "format": "prettier --check ."
