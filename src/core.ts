@@ -87,11 +87,20 @@ export function canonicalize(value: unknown): string {
       throw new TypeError("non-finite numbers are not canonical JSON");
     return JSON.stringify(value);
   }
-  if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
+  if (Array.isArray(value)) {
+    if (value.some((item) => item === undefined))
+      throw new TypeError("undefined is not canonical JSON");
+    return `[${value.map(canonicalize).join(",")}]`;
+  }
   if (typeof value === "object") {
+    if (
+      Object.values(value as Record<string, unknown>).some(
+        (item) => item === undefined,
+      )
+    )
+      throw new TypeError("undefined is not canonical JSON");
     return `{${Object.entries(value as Record<string, unknown>)
-      .filter(([, item]) => item !== undefined)
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([key, item]) => `${JSON.stringify(key)}:${canonicalize(item)}`)
       .join(",")}}`;
   }
@@ -113,7 +122,7 @@ export function createReceipt(input: {
     outcome: input.outcome,
     input: input.input,
     tool: { version: "0.1.0", commit: process.env.GIT_COMMIT ?? "local" },
-    discovery: input.discovery,
+    ...(input.discovery ? { discovery: input.discovery } : {}),
     candidates: input.candidates ?? [],
   });
   const bytes = Buffer.from(canonicalize(unsignedReceipt));

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const root = new URL("..", import.meta.url).pathname;
-const { candidateUrl, withRetry, withTimeout } = await import(
+const { candidateUrl, withRetry, withTimeout, anchor } = await import(
   `${root}dist/pipeline.js`
 );
 
@@ -49,5 +49,15 @@ test("provider timeout returns a bounded typed failure", async () => {
   await assert.rejects(
     withTimeout(new Promise(() => undefined), 10, "test provider"),
     /provider_unavailable: test provider timed out/,
+  );
+});
+
+test("anchor rejects a forged receipt before reading wallet configuration", async () => {
+  await assert.rejects(
+    anchor({
+      unsignedReceipt: { outcome: "verified_image_correspondence" },
+      signature: {},
+    }),
+    /receipt signature or schema is invalid/,
   );
 });

@@ -9,11 +9,21 @@ const root = new URL("..", import.meta.url).pathname;
 const { canonicalize, createReceipt, verifyReceipt, validateImage } =
   await import(`${root}dist/core.js`);
 
-test("canonicalization is stable across key order", () => {
+test("canonicalization is stable across key order and rejects unsupported values", () => {
   assert.equal(
     canonicalize({ b: 2, a: [true, "x"] }),
     '{"a":[true,"x"],"b":2}',
   );
+  assert.equal(canonicalize({ z: 1, ä: 2 }), '{"z":1,"ä":2}');
+  for (const value of [
+    NaN,
+    Infinity,
+    BigInt(1),
+    undefined,
+    { missing: undefined },
+    [undefined],
+  ])
+    assert.throws(() => canonicalize(value));
 });
 
 test("receipt verification rejects a changed signed field", () => {

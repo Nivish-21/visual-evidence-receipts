@@ -468,6 +468,10 @@ export async function preflight() {
 }
 
 export async function anchor(receipt: EvidenceReceipt) {
+  if (verifyReceipt(receipt).receiptIntegrity !== "valid")
+    throw new Error(
+      "chain_unavailable: receipt signature or schema is invalid",
+    );
   if (receipt.unsignedReceipt.outcome !== "verified_image_correspondence")
     throw new Error(
       "chain_unavailable: only verified_image_correspondence may be anchored",
