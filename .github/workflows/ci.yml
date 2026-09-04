@@ -17,4 +17,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run format
       - run: npm run build
-      - run: git grep -nE 'AIza|ghp_|gho_|0x[a-fA-F0-9]{64}' -- . ':!README.md' ':!.env.example' && exit 1 || exit 0
+      - run: |
+          pattern='AI''za|gh''p_|gh''o_|0x[a-fA-F0-9]{64}'
+          if git grep -nE "$pattern" -- . ':!README.md' ':!.env.example'; then
+            exit 1
+          fi
