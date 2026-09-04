@@ -1,10 +1,7 @@
 # Status
 
-## 2026-09-04 — Task 1 complete
+## 2026-09-04 — Core local build complete; external demonstration gate open
 
-Repository bootstrap, safety contract, strict TypeScript tooling, CI, README,
-contributor guidance, and project logs are committed and pushed. Local quality
-gates pass; GitHub Actions run `33854776122` passed all CI checks.
+Implemented and locally exercised: image validation, RFC-8785-style canonical receipt serialization for the strict JSON schema, SHA-256, Ed25519 signing/tamper detection, CLI commands, Google Vision live-call adapter, bounded HTTPS candidate checks, and Solidity registry source.
 
-Next: Task 2 — canonical receipt schemas, deterministic JCS hashing, and
-Ed25519 test vectors.
+The machine has no Google Application Default Credentials, Sepolia RPC endpoint, issuer wallet, registry deployment, or approved 1:1 comparator/model. Therefore no live provider response, positive face-correspondence decision, or blockchain transaction has been claimed. See `docs/DEMO.md` for the exact remaining external setup and rehearsal.
