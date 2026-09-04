@@ -6,7 +6,9 @@
 - Added signature-based image validation for JPEG/PNG/WebP using bounded Sharp decoding.
 - Added `preflight`, `scan`, `issue`, `verify`, and guarded `anchor` CLI commands.
 - Added Google Vision live provider integration, HTTPS candidate safety checks, and a minimal Solidity registry source.
-- Added demo runbook and limitations. Live positive matching/anchoring is intentionally blocked until external credentials, a calibrated comparator, and a deployed Sepolia registry exist.
+- Added bounded retries (three attempts), provider/fetch timeouts, streamed candidate body-size enforcement, DNS resolution checks, and rejection of private, IPv6-local, credential-bearing, and non-default-port URLs.
+- Added deterministic end-to-end receipt/tamper/invalid-input CLI checks and dedicated hardening tests.
+- Added `docs/ACCOUNTS.md` covering the required Google Cloud, Sepolia wallet, and RPC-provider setup.
 
 ## 2026-09-04 — Task 1: bootstrap
 

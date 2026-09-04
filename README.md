@@ -64,6 +64,7 @@ No server is required: this is a local CLI. It has no database, hosted site, soc
 
 ## Demo and limitations
 
+- [Accounts and setup](docs/ACCOUNTS.md)
 - [Live demo runbook](docs/DEMO.md)
 - [Limitations](docs/LIMITATIONS.md)
 - [Full plan and acceptance contract](docs/PLAN.md)

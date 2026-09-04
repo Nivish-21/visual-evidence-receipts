@@ -1,6 +1,9 @@
 import { createHash, generateKeyPairSync, type KeyObject } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { request } from "node:https";
+import { isIP } from "node:net";
+import { resolve } from "node:path";
 import { ImageAnnotatorClient } from "@google-cloud/vision";
 import sharp from "sharp";
 import {
@@ -31,7 +34,12 @@ export type FaceBox = {
 };
 type Candidate = { url: string; rank: number; pageUrl?: string };
 
-const MAX_CANDIDATES = 10;
+const MAX_CANDIDATES = 3;
+const MAX_CANDIDATE_BYTES = 7 * 1024 * 1024;
+const FETCH_TIMEOUT_MS = 5_000;
+const RETRY_ATTEMPTS = 2;
+const RETRY_DELAY_MS = 250;
+const PROVIDER_TIMEOUT_MS = 8_000;
 const receiptAbi = parseAbi([
   "event EvidenceAnchored(bytes32 indexed receiptHash, bytes32 indexed collectorKeyId, string schemaVersion, string policyVersion, address indexed issuer)",
 ]);
@@ -84,9 +92,14 @@ export async function scan(image: string, faceIndex?: number) {
       "provider_unavailable: GOOGLE_APPLICATION_CREDENTIALS is required for live face detection",
     );
   const client = new ImageAnnotatorClient();
-  const [response] = await client.faceDetection({
-    image: { content: await readFile(image) },
-  });
+  const inputBytes = await readFile(image);
+  const [response] = await withRetry(() =>
+    withTimeout(
+      client.faceDetection({ image: { content: inputBytes } }),
+      PROVIDER_TIMEOUT_MS,
+      "face detection",
+    ),
+  );
   const faces = (response.faceAnnotations ?? [])
     .map((face) => toFaceBox(face.boundingPoly?.vertices))
     .filter((box): box is FaceBox => Boolean(box))
@@ -134,9 +147,13 @@ async function discovery(faceCrop: Buffer): Promise<{
       "provider_unavailable: GOOGLE_APPLICATION_CREDENTIALS is required for live discovery",
     );
   const client = new ImageAnnotatorClient();
-  const [response] = await client.webDetection({
-    image: { content: faceCrop },
-  });
+  const [response] = await withRetry(() =>
+    withTimeout(
+      client.webDetection({ image: { content: faceCrop } }),
+      PROVIDER_TIMEOUT_MS,
+      "web discovery",
+    ),
+  );
   const raw = JSON.stringify(response.webDetection ?? {});
   const candidates: Candidate[] = [];
   for (const [rank, item] of (
@@ -152,19 +169,162 @@ async function discovery(faceCrop: Buffer): Promise<{
   };
 }
 
-function publicHttps(url: string): URL {
-  const parsed = new URL(url);
-  if (parsed.protocol !== "https:" || parsed.port)
-    throw new Error(
-      "unsupported_or_private_source: candidate must be HTTPS on default port",
+function retryable(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return !/^(invalid_input|unsupported_or_private_source|chain_unavailable):/.test(
+    message,
+  );
+}
+
+export async function withTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`provider_unavailable: ${label} timed out`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+export async function withRetry<T>(
+  operation: () => Promise<T>,
+  attempts = RETRY_ATTEMPTS,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!retryable(error) || attempt === attempts) break;
+      await new Promise((done) => setTimeout(done, RETRY_DELAY_MS * attempt));
+    }
+  }
+  throw lastError;
+}
+
+function privateIp(address: string): boolean {
+  if (isIP(address) === 6)
+    return (
+      address === "::1" ||
+      address.startsWith("fc") ||
+      address.startsWith("fd") ||
+      address.startsWith("fe80:")
     );
+  return /^(0\.|10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(
+    address,
+  );
+}
+
+export function candidateUrl(url: string): URL {
+  const parsed = new URL(url);
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
   if (
-    /^(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/i.test(
-      parsed.hostname,
+    parsed.protocol !== "https:" ||
+    parsed.port ||
+    parsed.username ||
+    parsed.password ||
+    isIP(hostname) ||
+    /^(0\.0\.0\.0|127\.|10\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(
+      hostname,
     )
   )
+    throw new Error(
+      "unsupported_or_private_source: candidate must be public HTTPS without credentials",
+    );
+  if (/^(localhost|localhost\.|.*\.local)$/i.test(hostname))
     throw new Error("unsupported_or_private_source: private candidate host");
   return parsed;
+}
+
+async function publicHttps(url: string): Promise<URL> {
+  const parsed = candidateUrl(url);
+  const addresses = await lookup(parsed.hostname, {
+    all: true,
+    verbatim: true,
+  });
+  if (!addresses.length || addresses.some(({ address }) => privateIp(address)))
+    throw new Error(
+      "unsupported_or_private_source: candidate resolved to a private address",
+    );
+  return parsed;
+}
+
+async function fetchCandidate(
+  url: URL,
+): Promise<{ contentType: string; bytes: Buffer }> {
+  const addresses = await withTimeout(
+    lookup(url.hostname, { all: true, verbatim: true }),
+    3_000,
+    "candidate DNS lookup",
+  );
+  if (!addresses.length || addresses.some(({ address }) => privateIp(address)))
+    throw new Error(
+      "unsupported_or_private_source: candidate resolved to a private address",
+    );
+  const target = addresses[0];
+  if (!target)
+    throw new Error(
+      "unsupported_or_private_source: candidate has no usable address",
+    );
+  return new Promise((resolve, reject) => {
+    const req = request(
+      url,
+      {
+        headers: { Accept: "image/avif,image/webp,image/png,image/jpeg" },
+        lookup: (_hostname, _options, callback) =>
+          callback(null, target.address, target.family),
+        timeout: FETCH_TIMEOUT_MS,
+      },
+      async (response) => {
+        try {
+          if (
+            response.statusCode !== 200 ||
+            !response.headers["content-type"]?.startsWith("image/")
+          )
+            throw new Error("candidate media unavailable");
+          const announced = Number(response.headers["content-length"] ?? 0);
+          if (
+            announced &&
+            (!Number.isSafeInteger(announced) ||
+              announced > MAX_CANDIDATE_BYTES)
+          )
+            throw new Error("candidate exceeds size limit");
+          const chunks: Buffer[] = [];
+          let total = 0;
+          for await (const chunk of response) {
+            total += chunk.length;
+            if (total > MAX_CANDIDATE_BYTES)
+              throw new Error("candidate exceeds size limit");
+            chunks.push(chunk);
+          }
+          resolve({
+            contentType: response.headers["content-type"],
+            bytes: Buffer.concat(chunks, total),
+          });
+        } catch (error) {
+          response.destroy();
+          reject(error);
+        }
+      },
+    );
+    req.on("timeout", () =>
+      req.destroy(new Error("provider_unavailable: candidate fetch timed out")),
+    );
+    req.on("error", reject);
+    req.end();
+  });
 }
 
 async function candidateEvidence(candidates: Candidate[]) {
@@ -175,17 +335,8 @@ async function candidateEvidence(candidates: Candidate[]) {
   }> = [];
   for (const candidate of candidates) {
     try {
-      const url = publicHttps(candidate.url);
-      const response = await fetch(url, {
-        redirect: "error",
-        signal: AbortSignal.timeout(8_000),
-      });
-      const contentType = response.headers.get("content-type") ?? "";
-      if (!response.ok || !contentType.startsWith("image/"))
-        throw new Error("candidate media unavailable");
-      const bytes = Buffer.from(await response.arrayBuffer());
-      if (bytes.length > 7 * 1024 * 1024)
-        throw new Error("candidate exceeds size limit");
+      const url = await publicHttps(candidate.url);
+      const { bytes } = await withRetry(() => fetchCandidate(url));
       await sharp(bytes, { limitInputPixels: 20_000_000 }).metadata();
       results.push({
         urlSha256: sha256(url.toString()),
