@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-09-04 — Node 24 LTS runtime
+
+- Pinned Node.js 24.20.0 LTS in `.node-version`, package engines, and GitHub Actions.
+
 ## 2026-09-04 — Core CLI and evidence contract
 
 - Added strict receipt schema, deterministic canonical JSON, SHA-256 digests, locally generated Ed25519 collector signatures, and tamper verification.

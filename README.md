@@ -14,7 +14,9 @@ authorized image → local validation → live Google Vision face/discovery call
 
 It **does not identify people**, prove social-account ownership, prove a post is true, or prove exhaustive internet coverage. A no-result means only that the configured provider found no qualifying public candidate during that run.
 
-## Quick start
+## Node runtime
+
+The project pins **Node.js 24.20.0 (Krypton LTS)** in `.node-version`, package engines, and GitHub Actions. Node 26 is the current release, but Node 24 is the current LTS line; use LTS for the hackathon build to avoid unnecessary runtime churn.
 
 ```bash
 npm ci

@@ -14,7 +14,7 @@
     "format": "prettier --check ."
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24.20.0 <25"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
